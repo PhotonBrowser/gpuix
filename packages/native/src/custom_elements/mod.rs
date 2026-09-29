@@ -26,37 +26,62 @@ pub mod markdown;
 /// to build GPUI elements with events and focus.
 pub struct CustomRenderContext<'a> {
     /// Numeric element ID (matches React's instance ID).
-    pub id: u64,
+    pub(crate) id: u64,
     /// Event types registered by React (e.g. "keyDown", "click").
-    pub events: &'a HashSet<String>,
+    pub(crate) events: &'a HashSet<String>,
     /// Callback for emitting events back to JS.
-    pub event_callback: &'a Option<EventCallback>,
+    pub(crate) event_callback: &'a Option<EventCallback>,
     /// Pre-created FocusHandle for this element (if it has keyboard/focus listeners).
-    pub focus_handle: Option<&'a gpui::FocusHandle>,
+    pub(crate) focus_handle: Option<&'a gpui::FocusHandle>,
     /// Style object from the retained element for layout and appearance.
-    pub style: Option<&'a crate::style::StyleDesc>,
+    pub(crate) style: Option<&'a crate::style::StyleDesc>,
     /// Built child elements from the retained tree for this custom node.
-    pub children: Vec<gpui::AnyElement>,
+    pub(crate) children: Vec<gpui::AnyElement>,
     /// Live text selection. Elements that paint text MUST route it through
     /// `crate::text::selectable_text` with this handle, otherwise their glyphs
     /// are invisible to a drag that starts outside them.
-    pub selection: crate::text::SharedSelection,
+    pub(crate) selection: crate::text::SharedSelection,
     /// False when an ancestor set `userSelect: "none"`.
-    pub selectable: bool,
+    pub(crate) selectable: bool,
     /// Inherited selection wash colour.
-    pub selection_wash: gpui::Hsla,
+    pub(crate) selection_wash: gpui::Hsla,
     /// `highlight` declared by the nearest ancestor, unresolved.
     ///
     /// A native element generates its text during `render()`, so the retained
     /// tree never sees it and the build-time resolver cannot produce ranges for
     /// it. `ctx.text` matches the exact string it is about to paint instead,
     /// which makes drift between the search pass and the paint pass impossible.
-    pub highlight_set: Option<std::sync::Arc<crate::text::HighlightContext>>,
+    pub(crate) highlight_set: Option<std::sync::Arc<crate::text::HighlightContext>>,
     /// Retained custom props, including `role` and `aria-*`.
-    pub props: &'a HashMap<String, serde_json::Value>,
+    pub(crate) props: &'a HashMap<String, serde_json::Value>,
 }
 
 impl CustomRenderContext<'_> {
+    /// Stable retained-tree id for this custom host node.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Current React props for this custom host node.
+    pub fn props(&self) -> &HashMap<String, serde_json::Value> {
+        self.props
+    }
+
+    /// GPUIX-resolved style values for this custom host node.
+    pub fn style(&self) -> Option<&crate::style::StyleDesc> {
+        self.style
+    }
+
+    /// Children already built by the retained renderer.
+    pub fn children(&self) -> &[gpui::AnyElement] {
+        &self.children
+    }
+
+    /// Event types enabled for this host element by React.
+    pub fn events(&self) -> &HashSet<String> {
+        self.events
+    }
+
     /// Build a selectable text run for this element. `sub` distinguishes
     /// multiple runs painted by the same element, such as code-block lines, and
     /// must be stable across frames or the selection flickers.
@@ -107,7 +132,7 @@ impl CustomRenderContext<'_> {
 ///
 /// The caller must have given `el` a host-derived id already: gpui keys both the
 /// pseudo-style state and the accessibility node off that id.
-pub(crate) fn custom_surface(
+pub fn custom_surface(
     mut el: gpui::Stateful<gpui::Div>,
     ctx: &CustomRenderContext,
 ) -> gpui::Stateful<gpui::Div> {
@@ -224,6 +249,17 @@ pub trait CustomElement: 'static {
     /// Clean up resources (GPUI entities, subscriptions, etc.)
     fn destroy(&mut self);
 
+    /// Whether this element needs GPUIX to call `poll` on a yielding timer.
+    /// Elements driven by native callbacks should leave this disabled.
+    fn needs_polling(&self) -> bool {
+        false
+    }
+
+    /// Poll non-blocking native work. Return true when GPUI should repaint.
+    fn poll(&mut self) -> bool {
+        false
+    }
+
     /// Current live GPU image on `<img>`, if any.
     fn live_image(&self) -> Option<std::sync::Arc<gpui::RenderImage>> {
         None
@@ -253,6 +289,15 @@ pub trait CustomElementFactory: 'static {
     /// Create a new element instance.
     fn create(&self, id: u64) -> Box<dyn CustomElement>;
 }
+
+/// A factory linked into the native addon. Registrations are static and live
+/// for the process lifetime, while each renderer owns its own factory registry
+/// and element instances.
+pub struct CustomElementRegistration {
+    pub create_factory: fn() -> Box<dyn CustomElementFactory>,
+}
+
+inventory::collect!(CustomElementRegistration);
 
 // ── Registry ─────────────────────────────────────────────────────────
 
@@ -321,12 +366,38 @@ impl CustomElementRegistry {
         registry.register(Box::new(code::CodeFactory));
         registry.register(Box::new(diff::DiffFactory));
         registry.register(Box::new(markdown::MarkdownFactory));
+        let mut external: Vec<_> = inventory::iter::<CustomElementRegistration>
+            .into_iter()
+            .map(|registration| (registration.create_factory)())
+            .collect();
+        external.sort_by(|a, b| a.element_type().cmp(b.element_type()));
+        for factory in external {
+            let element_type = factory.element_type().to_string();
+            if registry.factories.contains_key(&element_type) {
+                panic!(
+                    "external custom element factory conflicts with built-in type {element_type:?}"
+                );
+            }
+            registry.register(factory);
+        }
         registry
     }
 
     pub fn register(&mut self, factory: Box<dyn CustomElementFactory>) {
         self.factories
             .insert(factory.element_type().to_string(), factory);
+    }
+
+    pub(crate) fn needs_polling(&self) -> bool {
+        self.instances
+            .values()
+            .any(|entry| entry.element.needs_polling())
+    }
+
+    pub(crate) fn poll(&mut self) -> bool {
+        self.instances
+            .values_mut()
+            .fold(false, |changed, entry| entry.element.poll() || changed)
     }
 
     /// Get an existing adapter or create one via the registered factory.
@@ -561,5 +632,195 @@ mod tests {
         assert!(registry.get_or_create(42, "first").is_some());
         assert!(registry.get_or_create(42, "second").is_some());
         assert_eq!(destroyed.get(), 1);
+    }
+}
+
+#[cfg(test)]
+mod extension_api_tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct Calls {
+        created: usize,
+        destroyed: usize,
+        props: HashMap<String, serde_json::Value>,
+    }
+
+    struct ExtensionFactory(Arc<Mutex<Calls>>);
+
+    impl CustomElementFactory for ExtensionFactory {
+        fn element_type(&self) -> &str {
+            "test-external-element"
+        }
+
+        fn create(&self, _id: u64) -> Box<dyn CustomElement> {
+            self.0.lock().unwrap().created += 1;
+            Box::new(ExtensionElement(self.0.clone()))
+        }
+    }
+
+    struct ExtensionElement(Arc<Mutex<Calls>>);
+
+    impl CustomElement for ExtensionElement {
+        fn render(
+            &mut self,
+            _ctx: CustomRenderContext,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<crate::renderer::GpuixView>,
+        ) -> gpui::AnyElement {
+            use gpui::IntoElement;
+            gpui::Empty.into_any_element()
+        }
+
+        fn set_prop(&mut self, key: &str, value: serde_json::Value) {
+            self.0.lock().unwrap().props.insert(key.to_owned(), value);
+        }
+
+        fn supported_props(&self) -> &'static [&'static str] {
+            &["value"]
+        }
+
+        fn supported_events(&self) -> &'static [&'static str] {
+            &[]
+        }
+
+        fn destroy(&mut self) {
+            self.0.lock().unwrap().destroyed += 1;
+        }
+    }
+
+    fn registered_factory() -> Box<dyn CustomElementFactory> {
+        Box::new(ExtensionFactory(Arc::new(Mutex::new(Calls::default()))))
+    }
+
+    crate::register_custom_element!(registered_factory);
+
+    #[test]
+    fn external_factory_registers_creates_syncs_and_destroys_instance() {
+        let calls = Arc::new(Mutex::new(Calls::default()));
+        let mut registry = CustomElementRegistry::new();
+        registry.register(Box::new(ExtensionFactory(calls.clone())));
+
+        let props = HashMap::from([("value".to_owned(), json!("reached native element"))]);
+        registry
+            .get_or_create(17, "test-external-element")
+            .unwrap()
+            .sync(&props);
+        assert_eq!(calls.lock().unwrap().created, 1);
+        assert_eq!(
+            calls.lock().unwrap().props["value"],
+            json!("reached native element")
+        );
+
+        registry.destroy(17);
+        assert_eq!(calls.lock().unwrap().destroyed, 1);
+    }
+
+    #[test]
+    fn static_external_registration_is_included_and_unknown_type_is_unresolved() {
+        let mut registry = CustomElementRegistry::with_defaults();
+        assert!(registry.factories.contains_key("test-external-element"));
+        assert!(registry.get_or_create(18, "unregistered-element").is_none());
+    }
+
+    #[test]
+    fn built_in_custom_elements_remain_registered() {
+        let registry = CustomElementRegistry::with_defaults();
+        for element_type in ["input", "textarea", "img", "svg", "markdown", "diff"] {
+            assert!(
+                registry.factories.contains_key(element_type),
+                "{element_type}"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn renderer_calls_external_instance_render(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct RenderingFactory(Arc<AtomicUsize>);
+        struct RenderingElement(Arc<AtomicUsize>);
+
+        impl CustomElementFactory for RenderingFactory {
+            fn element_type(&self) -> &str {
+                "test-render-element"
+            }
+
+            fn create(&self, _id: u64) -> Box<dyn CustomElement> {
+                Box::new(RenderingElement(self.0.clone()))
+            }
+        }
+
+        impl CustomElement for RenderingElement {
+            fn render(
+                &mut self,
+                _ctx: CustomRenderContext,
+                _window: &mut gpui::Window,
+                _cx: &mut gpui::Context<crate::renderer::GpuixView>,
+            ) -> gpui::AnyElement {
+                use gpui::IntoElement;
+                self.0.fetch_add(1, Ordering::SeqCst);
+                gpui::Empty.into_any_element()
+            }
+
+            fn set_prop(&mut self, _key: &str, _value: serde_json::Value) {}
+
+            fn supported_props(&self) -> &'static [&'static str] {
+                &[]
+            }
+
+            fn supported_events(&self) -> &'static [&'static str] {
+                &[]
+            }
+
+            fn destroy(&mut self) {}
+        }
+
+        let renders = Arc::new(AtomicUsize::new(0));
+        let view_renders = renders.clone();
+        let window = cx.add_window(move |_, _| {
+            let mut view = crate::renderer::GpuixView::new(
+                Arc::new(std::sync::Mutex::new(
+                    crate::retained_tree::RetainedTree::new(),
+                )),
+                None,
+                String::new(),
+                crate::text::SharedSelection::default(),
+            );
+            view.custom_registry
+                .register(Box::new(RenderingFactory(view_renders)));
+            view
+        });
+
+        cx.update_window(window.into(), |view, window, app| {
+            let view = view.downcast::<crate::renderer::GpuixView>().unwrap();
+            app.update_entity(&view, |view, cx| {
+                let events = HashSet::new();
+                let event_callback: Option<crate::renderer::EventCallback> = None;
+                let props = HashMap::new();
+                let context = CustomRenderContext {
+                    id: 91,
+                    events: &events,
+                    event_callback: &event_callback,
+                    focus_handle: None,
+                    style: None,
+                    children: Vec::new(),
+                    selection: crate::text::SharedSelection::default(),
+                    selectable: true,
+                    selection_wash: gpui::Hsla::default(),
+                    highlight_set: None,
+                    props: &props,
+                };
+                let _element =
+                    view.custom_registry
+                        .render("test-render-element", &props, context, window, cx);
+            });
+        })
+        .unwrap();
+
+        assert_eq!(renders.load(Ordering::SeqCst), 1);
     }
 }

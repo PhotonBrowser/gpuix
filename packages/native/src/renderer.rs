@@ -3384,7 +3384,10 @@ impl Drop for GpuixRenderer {
 
 // ── GPUI View ────────────────────────────────────────────────────────
 
-pub(crate) struct GpuixView {
+/// The retained GPUI view type is public so external native element
+/// implementations can name GPUI's typed `Context`; its fields and behavior
+/// remain private to GPUIX.
+pub struct GpuixView {
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
     pub(crate) event_callback: Option<EventCallback>,
     pub(crate) window_title: String,
@@ -3406,6 +3409,7 @@ pub(crate) struct GpuixView {
     /// Registry for custom element types (input, editor, diff, etc.).
     /// Stores factories (one per type) and live instances (one per element ID).
     pub(crate) custom_registry: CustomElementRegistry,
+    custom_element_poll_task: Option<gpui::Task<()>>,
     /// Persistent ScrollHandles keyed by element ID.
     /// Created lazily for elements with overflow: "scroll" (or per-axis scroll).
     /// Handles persist across renders so GPUI maintains scroll offset state.
@@ -3669,6 +3673,7 @@ impl GpuixView {
             pending_focus_element: None,
             focus_subscriptions: HashMap::new(),
             custom_registry: CustomElementRegistry::with_defaults(),
+            custom_element_poll_task: None,
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             selection,
@@ -4807,6 +4812,27 @@ impl gpui::Render for GpuixView {
 
         if motion_active {
             window.request_animation_frame();
+        }
+
+        if self.custom_registry.needs_polling() && self.custom_element_poll_task.is_none() {
+            self.custom_element_poll_task = Some(cx.spawn(async move |view, cx| loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(16))
+                    .await;
+                let keep_polling = view
+                    .update(cx, |view, cx| {
+                        if view.custom_registry.poll() {
+                            cx.notify();
+                        }
+                        view.custom_registry.needs_polling()
+                    })
+                    .unwrap_or(false);
+                if !keep_polling {
+                    break;
+                }
+            }));
+        } else if !self.custom_registry.needs_polling() {
+            self.custom_element_poll_task.take();
         }
 
         result
