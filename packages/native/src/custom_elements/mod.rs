@@ -273,6 +273,11 @@ pub trait CustomElement: 'static {
         None
     }
 
+    /// Mutable GPUI image owned by this native element, if any.
+    fn live_dynamic_image(&self) -> Option<std::sync::Arc<gpui::LiveImage>> {
+        None
+    }
+
     /// Replace the live GPU image on `<img>`. Returns the previous image when
     /// this adapter already had one, so the renderer can upload in place.
     fn replace_live_image(
@@ -502,6 +507,9 @@ impl CustomElementRegistry {
                 .or_else(|| entry.element.take_dropped_image())
             {
                 window.drop_image(image).ok();
+            }
+            if let Some(image) = entry.element.live_dynamic_image() {
+                window.drop_live_image(&image);
             }
             entry.element.destroy();
         }
