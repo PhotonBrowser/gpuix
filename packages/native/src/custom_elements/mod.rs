@@ -809,6 +809,7 @@ mod extension_api_tests {
                     events: &events,
                     event_callback: &event_callback,
                     focus_handle: None,
+                    keyboard_focus: None,
                     style: None,
                     children: Vec::new(),
                     selection: crate::text::SharedSelection::default(),

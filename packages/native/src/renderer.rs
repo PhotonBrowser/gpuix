@@ -3611,7 +3611,13 @@ fn window_key_events(
                     return;
                 }
                 if key_up {
-                    emit_key_event(&callback_up, event_id, "windowKeyUp", &event.keystroke, None);
+                    emit_key_event(
+                        &callback_up,
+                        event_id,
+                        "windowKeyUp",
+                        &event.keystroke,
+                        None,
+                    );
                 }
             });
         },
@@ -3783,10 +3789,8 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> std::result::Result<(), String> {
-        let image = crate::custom_elements::img::render_image_from_encoded(
-            bytes,
-            cx.svg_renderer(),
-        )?;
+        let image =
+            crate::custom_elements::img::render_image_from_encoded(bytes, cx.svg_renderer())?;
         self.set_live_image(id, image, window, cx)
     }
 
@@ -4037,7 +4041,9 @@ impl GpuixView {
                 break None;
             };
             if let Some(entry) = self.virtual_lists.get(&parent_id) {
-                break entry.logical_index_of(current).map(|index| (parent_id, index));
+                break entry
+                    .logical_index_of(current)
+                    .map(|index| (parent_id, index));
             }
             current = parent_id;
         };
@@ -4486,7 +4492,12 @@ impl VirtualListEntry {
 }
 
 impl GpuixView {
-    pub(crate) fn request_focus(&mut self, id: u64, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) {
+    pub(crate) fn request_focus(
+        &mut self,
+        id: u64,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
         self.reveal_virtual_list_ancestor(id);
         if let Some(handle) = self.focus_handles.get(&id) {
             self.pending_focus_element = None;

@@ -350,8 +350,8 @@ pub fn render_image_from_encoded(
     bytes: Vec<u8>,
     svg_renderer: gpui::SvgRenderer,
 ) -> std::result::Result<std::sync::Arc<gpui::RenderImage>, String> {
-    let format = sniff_image_format(&bytes)
-        .ok_or_else(|| "unrecognized image format".to_string())?;
+    let format =
+        sniff_image_format(&bytes).ok_or_else(|| "unrecognized image format".to_string())?;
     gpui::Image::from_bytes(format, bytes)
         .to_image_data(svg_renderer)
         .map_err(|error| error.to_string())

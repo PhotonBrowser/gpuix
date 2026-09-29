@@ -1717,7 +1717,13 @@ impl gpui::Render for TextEditorState {
             })
             .when(self.emits_key_up, move |editor| {
                 editor.on_key_up(move |event, _window, _cx| {
-                    emit_key_event(&key_up_callback, element_id, "keyUp", &event.keystroke, None);
+                    emit_key_event(
+                        &key_up_callback,
+                        element_id,
+                        "keyUp",
+                        &event.keystroke,
+                        None,
+                    );
                 })
             })
             .w_full()

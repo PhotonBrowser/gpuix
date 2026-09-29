@@ -877,7 +877,9 @@ impl TestGpuixRenderer {
         with_test_state(|cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, window, app| {
-                view.update(app, |view, cx| view.set_encoded_image(id, bytes, window, cx))
+                view.update(app, |view, cx| {
+                    view.set_encoded_image(id, bytes, window, cx)
+                })
             })
             .map_err(|e| Error::from_reason(e.to_string()))?
             .map_err(Error::from_reason)
