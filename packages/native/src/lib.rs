@@ -39,9 +39,30 @@ mod updater;
 ))]
 mod test_renderer;
 
+pub use custom_elements::{
+    custom_surface as custom_element_surface, CustomElement, CustomElementFactory,
+    CustomElementRegistration, CustomRenderContext,
+};
 pub use element_tree::*;
+#[doc(hidden)]
+pub use inventory as __inventory;
 pub use renderer::*;
 pub use style::*;
+
+/// Link a native custom-element factory into the production renderer.
+///
+/// The registration is static, so factories cannot disappear while renderer
+/// instances exist. Each GPUI renderer still owns its own factory registry.
+#[macro_export]
+macro_rules! register_custom_element {
+    ($factory:expr) => {
+        $crate::__inventory::submit! {
+            $crate::CustomElementRegistration {
+                create_factory: $factory,
+            }
+        }
+    };
+}
 
 #[cfg(any(
     test,
