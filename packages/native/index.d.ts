@@ -712,6 +712,8 @@ export interface WindowOptions {
   transparent?: boolean
   /** Hide the native titlebar so the app can draw chrome under the traffic lights. */
   titlebarTransparent?: boolean
+  /** Let app-owned UI handle titlebar dragging. Disables native dragging over titlebar content. */
+  appOwnsTitlebarDrag?: boolean
   /**
    * `"opaque"` | `"transparent"` | `"blurred"`. `transparent: true` is the
    * same as `"transparent"` when this is unset.

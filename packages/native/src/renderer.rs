@@ -6818,6 +6818,8 @@ pub struct WindowOptions {
     pub transparent: Option<bool>,
     /// Hide the native titlebar so the app can draw chrome under the traffic lights.
     pub titlebar_transparent: Option<bool>,
+    /// Let app-owned UI handle titlebar dragging instead of AppKit.
+    pub app_owns_titlebar_drag: Option<bool>,
     /// `"opaque"` | `"transparent"` | `"blurred"`. `transparent: true` is the
     /// same as `"transparent"` when this is unset.
     pub window_background: Option<String>,
@@ -6851,6 +6853,7 @@ impl Default for WindowOptions {
             fullscreen: Some(false),
             transparent: Some(false),
             titlebar_transparent: Some(false),
+            app_owns_titlebar_drag: Some(false),
             window_background: None,
             traffic_light_x: None,
             traffic_light_y: None,
@@ -6955,6 +6958,7 @@ fn to_gpui_window_options(
             appears_transparent: titlebar_transparent,
             traffic_light_position,
         }),
+        app_owns_titlebar_drag: options.app_owns_titlebar_drag.unwrap_or(false),
         is_resizable: options.resizable.unwrap_or(true),
         window_background,
         window_min_size,
