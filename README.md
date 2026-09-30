@@ -3628,6 +3628,24 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [ ] Hot reload of the native `.node` addon. `bun run dev` rebuilds and restarts. Native modules cannot unload.
 - [x] Native `motion.div` transitions with deterministic frame capture
 - [x] `AnimatePresence` exit transitions for `motion.div`
+- [x] macOS AppKit `MacOSGlassIconButton` with GPUI-managed layout
+
+`MacOSGlassIconButton` is a macOS-only AppKit control layered over a GPUI
+layout placeholder. It takes `icon` (an SF Symbol name), optional `size`,
+`disabled`, `accessibilityLabel`, and `onClick` props. For example:
+
+```tsx
+<MacOSGlassIconButton
+  icon="plus"
+  size={32}
+  accessibilityLabel="Add layer"
+  onClick={handleAdd}
+/>
+```
+
+The counter example includes this control for manual verification. On macOS 26
+and later it uses AppKit's Liquid Glass button bezel; earlier versions use the
+standard rounded AppKit bezel.
 
 ## Documentation
 

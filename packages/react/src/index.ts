@@ -71,6 +71,8 @@ export type {
 } from "./components/combobox.js"
 export { Button, buttonProps } from "./components/button.js"
 export type { ButtonBehavior, ButtonProps, ButtonState } from "./components/button.js"
+export { MacOSGlassIconButton } from "./components/macos-glass-icon-button.js"
+export type { MacOSGlassIconButtonProps } from "./components/macos-glass-icon-button.js"
 export {
   Dialog,
   DialogBackdrop,

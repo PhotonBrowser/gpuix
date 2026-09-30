@@ -3440,6 +3440,9 @@ pub struct GpuixView {
     /// Resolved `highlight` state, keyed by the element that declared it.
     /// Empty in every app that does not use search.
     highlights: HashMap<u64, HighlightCacheEntry>,
+    #[cfg(target_os = "macos")]
+    pub(crate) native_controls:
+        std::rc::Rc<std::cell::RefCell<crate::macos_controls::NativeControlRegistry>>,
 }
 
 /// Two-level cache for one element's `highlight`.
@@ -3735,6 +3738,10 @@ impl GpuixView {
             selection_scroll_task: None,
             clock: crate::automation::AutomationClock::new(),
             highlights: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            native_controls: std::rc::Rc::new(std::cell::RefCell::new(
+                crate::macos_controls::NativeControlRegistry::new(),
+            )),
         }
     }
 
@@ -3952,6 +3959,8 @@ impl GpuixView {
             highlights: &mut self.highlights,
             highlight_events: &mut highlight_events,
             keyboard_focus,
+            #[cfg(target_os = "macos")]
+            native_controls: self.native_controls.clone(),
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
@@ -4085,6 +4094,9 @@ pub(crate) struct BuildCtx<'a> {
     highlight_events: &'a mut Vec<(u64, usize)>,
     /// See `GpuixView::keyboard_focus_path`.
     pub keyboard_focus: Option<Arc<[u64]>>,
+    #[cfg(target_os = "macos")]
+    pub native_controls:
+        std::rc::Rc<std::cell::RefCell<crate::macos_controls::NativeControlRegistry>>,
 }
 
 /// Style properties that cascade into descendants.
@@ -4847,6 +4859,15 @@ impl gpui::Render for GpuixView {
         // Ensure custom element instances are destroyed when their IDs disappear.
         self.custom_registry
             .prune_missing(|id| tree.elements.contains_key(&id), window);
+        #[cfg(target_os = "macos")]
+        self.native_controls.borrow_mut().prune_missing(
+            &tree
+                .elements
+                .iter()
+                .filter(|(_, element)| element.element_type == "macos-glass-icon-button")
+                .map(|(&id, _)| id)
+                .collect(),
+        );
 
         // Clean up scroll handles for destroyed elements (IDs removed from tree).
         // Scrollability-based cleanup (element still exists but style changed
@@ -4887,6 +4908,8 @@ impl gpui::Render for GpuixView {
                     highlights: &mut self.highlights,
                     highlight_events: &mut highlight_events,
                     keyboard_focus,
+                    #[cfg(target_os = "macos")]
+                    native_controls: self.native_controls.clone(),
                 };
                 build_element(root_id, &mut ctx, window, cx)
             }
@@ -5082,6 +5105,8 @@ pub(crate) fn build_element(
                 selection_wash: inherited.selection_wash,
                 highlight_set: inherited.highlight.clone(),
                 props: &element.custom_props,
+                #[cfg(target_os = "macos")]
+                native_controls: ctx.native_controls.clone(),
             };
             ctx.custom_registry
                 .render(custom_type, &element.custom_props, render_ctx, window, cx)

@@ -242,6 +242,7 @@ export type ElementType =
   | "diff"
   | "markdown"
   | "virtual-list"
+  | "macos-glass-icon-button"
 
 // ── Theme ────────────────────────────────────────────────────────────
 

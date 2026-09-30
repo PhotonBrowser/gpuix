@@ -18,6 +18,8 @@ pub mod code;
 pub mod diff;
 pub mod img;
 pub mod input;
+#[cfg(target_os = "macos")]
+pub mod macos_glass_icon_button;
 pub mod markdown;
 
 // ── Render context ───────────────────────────────────────────────────
@@ -57,6 +59,9 @@ pub struct CustomRenderContext<'a> {
     pub(crate) highlight_set: Option<std::sync::Arc<crate::text::HighlightContext>>,
     /// Retained custom props, including `role` and `aria-*`.
     pub(crate) props: &'a HashMap<String, serde_json::Value>,
+    #[cfg(target_os = "macos")]
+    pub(crate) native_controls:
+        std::rc::Rc<std::cell::RefCell<crate::macos_controls::NativeControlRegistry>>,
 }
 
 impl CustomRenderContext<'_> {
@@ -83,6 +88,10 @@ impl CustomRenderContext<'_> {
     /// Event types enabled for this host element by React.
     pub fn events(&self) -> &HashSet<String> {
         self.events
+    }
+
+    pub(crate) fn event_callback(&self) -> Option<EventCallback> {
+        self.event_callback.clone()
     }
 
     /// Build a selectable text run for this element. `sub` distinguishes
@@ -374,6 +383,8 @@ impl CustomElementRegistry {
         registry.register(Box::new(code::CodeFactory));
         registry.register(Box::new(diff::DiffFactory));
         registry.register(Box::new(markdown::MarkdownFactory));
+        #[cfg(target_os = "macos")]
+        registry.register(Box::new(macos_glass_icon_button::GlassIconButtonFactory));
         let mut external: Vec<_> = inventory::iter::<CustomElementRegistration>
             .into_iter()
             .map(|registration| (registration.create_factory)())
@@ -825,6 +836,8 @@ mod extension_api_tests {
                     selection_wash: gpui::Hsla::default(),
                     highlight_set: None,
                     props: &props,
+                    #[cfg(target_os = "macos")]
+                    native_controls: view.native_controls.clone(),
                 };
                 let _element =
                     view.custom_registry

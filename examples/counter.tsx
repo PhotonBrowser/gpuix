@@ -7,7 +7,7 @@
  */
 
 import React, { useState } from 'react'
-import { render } from '@gpuix/react'
+import { MacOSGlassIconButton, render } from '@gpuix/react'
 
 function Counter() {
   const [count, setCount] = useState(0)
@@ -52,9 +52,16 @@ function Counter() {
       <div
         style={{
           display: 'flex',
+          alignItems: 'center',
           gap: 12,
         }}
       >
+        <MacOSGlassIconButton
+          icon="plus"
+          size={32}
+          accessibilityLabel="Add one"
+          onClick={() => setCount(c => c + 1)}
+        />
         <div
           style={{
             padding: 12,
