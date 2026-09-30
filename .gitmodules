@@ -1,4 +1,4 @@
 [submodule "zed"]
 	path = zed
-	url = https://github.com/PhotonBrowser/zed.git
+	url = git@github.com:PhotonBrowser/zed.git
 	branch = photon/live-image
