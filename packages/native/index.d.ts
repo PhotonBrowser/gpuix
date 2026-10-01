@@ -61,6 +61,8 @@ export declare class GpuixRenderer {
   applyBatch(json: string): Array<number>
   /** Pump the native event loop. Returns false after the last window closes. */
   tick(): boolean
+  /** Wake the embedded macOS event pump when native main-thread work arrives. */
+  setHostWakeCallback(callback?: (() => void) | undefined | null): void
   isInitialized(): boolean
   /**
    * Whether JavaScript must call tick() until it returns false.

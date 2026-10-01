@@ -8,10 +8,7 @@
 //!   const renderer = new GpuixRenderer(eventCallback)
 //!   renderer.init({ title: 'My App', width: 800, height: 600 })
 //!   renderer.applyBatch(json)             // one atomic React commit
-//!   setTimeout(function loop() {         // macOS pumps AppKit; Win/Linux polls UI thread
-//!     if (!renderer.tick()) process.exit(0)
-//!     setTimeout(loop, 8)
-//!   })
+//!   startFrameLoop(renderer)               // macOS native wakes; timer fallback
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use futures::channel::oneshot;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -29,7 +26,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 #[cfg(any(target_os = "macos", target_family = "wasm"))]
 use std::rc::Rc;
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
@@ -900,6 +897,8 @@ pub struct GpuixRenderer {
     event_callback: Mutex<Option<Arc<ThreadsafeFunction<EventPayload>>>>,
     tree: Arc<Mutex<RetainedTree>>,
     initialized: Arc<Mutex<bool>>,
+    #[cfg(target_os = "macos")]
+    host_wake_pending: Arc<AtomicBool>,
     /// Shared with GpuixView so napi methods can read the live selection
     /// without an App context. Paint and napi calls can use different threads.
     selection: SharedSelection,
@@ -1087,6 +1086,8 @@ impl GpuixRenderer {
             event_callback: Mutex::new(event_callback.map(Arc::new)),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             initialized: Arc::new(Mutex::new(false)),
+            #[cfg(target_os = "macos")]
+            host_wake_pending: Arc::new(AtomicBool::new(false)),
             selection: SharedSelection::default(),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
@@ -1392,6 +1393,27 @@ impl GpuixRenderer {
 
     // ── Frame loop ───────────────────────────────────────────────────
 
+    /// Arrange for native macOS work to wake the JavaScript host promptly.
+    /// The callback runs on the JavaScript thread and should call `tick()`.
+    #[napi]
+    pub fn set_host_wake_callback(&self, callback: Option<ThreadsafeFunction<()>>) {
+        #[cfg(target_os = "macos")]
+        {
+            self.host_wake_pending.store(false, Ordering::Release);
+            let waker = callback.map(|callback| {
+                let pending = self.host_wake_pending.clone();
+                Arc::new(move || {
+                    if !pending.swap(true, Ordering::AcqRel) {
+                        let _ = callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+                    }
+                }) as Arc<dyn Fn() + Send + Sync>
+            });
+            gpui_macos::set_embedded_host_waker(waker);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = callback;
+    }
+
     /// Pump the native event loop. Returns false after the last window closes.
     #[napi]
     pub fn tick(&self) -> Result<bool> {
@@ -1404,12 +1426,16 @@ impl GpuixRenderer {
 
         #[cfg(target_os = "macos")]
         {
+            self.host_wake_pending.store(false, Ordering::Release);
             let running = MAC_PLATFORM.with(|p| {
                 p.borrow()
                     .as_ref()
                     .map(|platform| platform.pump_events())
                     .unwrap_or(false)
             });
+            if !running {
+                gpui_macos::set_embedded_host_waker(None);
+            }
             return Ok(running);
         }
 
@@ -4840,6 +4866,19 @@ impl gpui::Render for GpuixView {
         cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
         use gpui::IntoElement;
+
+        if std::env::var_os("GPUIX_RENDER_TRACE").is_some() {
+            use std::io::Write;
+            let unix_ns = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let message = format!(
+                "[GPUIXRender] unix_ns={unix_ns} thread={:?} state=GPUIX_RENDER_BEGIN\n",
+                std::thread::current().id()
+            );
+            let _ = std::io::stderr().lock().write_all(message.as_bytes());
+        }
 
         window.set_window_title(&self.window_title);
 

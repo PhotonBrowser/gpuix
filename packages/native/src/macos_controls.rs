@@ -70,7 +70,7 @@ struct NativeButton {
 pub(crate) struct NativeControlRegistry {
     parent: Option<NonNull<NSView>>,
     controls: HashMap<u64, NativeButton>,
-    mtm: MainThreadMarker,
+    mtm: Option<MainThreadMarker>,
 }
 
 impl NativeControlRegistry {
@@ -78,7 +78,10 @@ impl NativeControlRegistry {
         Self {
             parent: None,
             controls: HashMap::new(),
-            mtm: MainThreadMarker::new().expect("GPUI macOS rendering runs on the AppKit thread"),
+            // GPUI's headless TestAppContext can construct renderer state off
+            // the AppKit thread. Native controls are unavailable there, but
+            // the renderer and its custom elements remain testable.
+            mtm: MainThreadMarker::new(),
         }
     }
 
@@ -101,6 +104,9 @@ impl NativeControlRegistry {
         disabled: bool,
         callback: Option<EventCallback>,
     ) {
+        let Some(mtm) = self.mtm else {
+            return;
+        };
         let Some(parent) = self.attach_to_window(window) else {
             return;
         };
@@ -119,11 +125,8 @@ impl NativeControlRegistry {
         };
         let Some(image) = image else { return };
 
-        let target = GlassButtonActionTarget::new(
-            id,
-            callback.unwrap_or_else(|| Arc::new(|_| {})),
-            self.mtm,
-        );
+        let target =
+            GlassButtonActionTarget::new(id, callback.unwrap_or_else(|| Arc::new(|_| {})), mtm);
         let action = Some(Sel::register(c"activate:"));
         // SAFETY: button factory is AppKit's main-thread constructor.
         let button = unsafe {
@@ -131,7 +134,7 @@ impl NativeControlRegistry {
                 &image,
                 Some(target.as_ref() as &AnyObject),
                 action,
-                self.mtm,
+                mtm,
             )
         };
         let parent = unsafe { parent.as_ref() };

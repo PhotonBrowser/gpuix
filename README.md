@@ -3455,6 +3455,9 @@ handling instead of a test-only input path.
 
 ## Testing
 
+Set `GPUIX_RENDER_TRACE=1` to log native `GpuixView` render entry with a
+Unix timestamp and thread ID. This diagnostic does not request extra redraws.
+
 The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).
 It runs the same `GpuixView`, `build_element()`, `apply_styles()`, and event
 handlers as production. Test windows are positioned offscreen and rendered by
